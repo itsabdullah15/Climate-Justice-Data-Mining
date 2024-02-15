@@ -8,13 +8,13 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.keys import Keys
 from selenium.common.exceptions import NoSuchElementException, TimeoutException, ElementClickInterceptedException
 from mappingfile import IDENS
 from datetime import datetime
 import requests
 from datetime import datetime
 import pandas as pd
+import csv
 import os
 from io import BytesIO
 from PIL import Image
@@ -106,6 +106,23 @@ def extract_text_loop():
         text_content = td_element.text
         Cases.append(text_content)
         print("Extracted Text:", text_content)
+    
+        current_date = datetime.now().strftime("%Y-%m-%d") #Assign Current Dates
+        csv_file_path = f'Output/{current_date}.csv' #Assign CSV Paths
+        if not os.path.isfile(csv_file_path):         # Check if the CSV file existss
+            with open(csv_file_path, 'w', newline='', encoding='utf-8') as csv_file: # If it doesn't exist, create the file and write header
+                csv_writer = csv.writer(csv_file)
+                csv_writer.writerow(['cases'])   # Write header
+
+        with open(csv_file_path, 'a', newline='', encoding='utf-8') as csv_file: # Append data to the existing or new CSV file
+            csv_writer = csv.writer(csv_file)
+            
+            for case in Cases:                # Write each row of text_content
+                csv_writer.writerow([case])
+
+        print(f"Text content saved to {csv_file_path}")
+        # Clear the text_content_list after saving data into CSV
+        Cases.clear()
 
 def back():
     try:
@@ -186,9 +203,13 @@ def first_loop():
     button_xpath = "(//tbody[@id='state_report_body']/tr/td[4]/a)"
     wait = WebDriverWait(driver, 20)
     try:
+        # skip = 1
         elements = wait.until(EC.presence_of_all_elements_located((By.XPATH, button_xpath)))
         print("Countttt ",len(elements))
         for element in elements:
+            # if skip<=3:
+            #     skip+=1
+            #     continue
             element.click()
             time.sleep(3)
             second_loop_both_button_clicked_single_row_column()
@@ -203,8 +224,6 @@ def first_loop():
         print(f"Error clicking the button: {e}")
 
 first_loop()
-
-
 
 time.sleep(20)
 
