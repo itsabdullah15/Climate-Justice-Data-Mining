@@ -17,6 +17,8 @@ from io import BytesIO
 from PIL import Image
 import pytesseract
 import cv2
+import re
+import numpy as np
 
 # Configure Firefox options for headless mode
 firefox_options = Options()
@@ -27,11 +29,13 @@ service = Service(geckodriver_path) # Set up the service
 driver = webdriver.Firefox(service=service) # for non-headless mode
 
 current_datetime = datetime.now() # Get the current date and time
+current_date = datetime.now().strftime("%Y-%m-%d") #Assign Current Dates
 
 url = IDENS.link
 driver.get(url)
 driver.maximize_window() #maximize the window
 driver.execute_script("window.scrollTo(0, 500);")
+time.sleep(1)
 
 ''' STEP 1 == Clicking on 20-30 year Total link'''
 xpath = '//a[@href="javascript:fetchYearData(\'tot20_30\',1)"]'
@@ -137,34 +141,49 @@ def second_captcha_solver():
         '''STEP 7 == Solving the Captcha img for solving'''
         if img_download_path is not None:
             image_path = img_download_path
-            img = cv2.imread(image_path)
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            blur = cv2.bilateralFilter(gray, 9, 75, 75)
-            text = pytesseract.image_to_string(blur) 
             # image = Image.open(image_path)
             # text = pytesseract.image_to_string(image) # Perform OCR on the image
-            text = text[:5] # Perform OCR on the image
-            print(text)
-            text = text[:5]
-            print("Extracted Text:", text) # Print the extracted text
+            # text = text[:5] # Perform OCR on the image
+            # print(text)
+            # text = text[:5]
+
+            def enhance_image(image_path, image_path_download,color_correction_factor=1.5):
+                img = cv2.imread(image_path) # Read the image
+                color_corrected_img = np.clip(img * color_correction_factor, 0, 255).astype(np.uint8)      # Apply color correction
+                cv2.imwrite(image_path_download, color_corrected_img)  # Save the enhanced image
+                text = pytesseract.image_to_string(image_path_download)  # Or use 'thresh' if you applied thresholding
+                text = re.sub(r'[^a-zA-Z0-9]', '', text)
+                print(text)
+                return color_corrected_img
+
+            image_path = 'CaptchaImg/26_02_2024_15_25_43.png'
+            image_path_download = 'CaptchaImg/enhanced_one.png'
+            enhanced_image = enhance_image(image_path)
+
+            print("Extracted Text:",text) # Print the extracted text
         else:
-            print("Not Able to find")
+            print("Not Able to find the img Path")
         
         captcha_input = driver.find_element("id", "captcha")
         captcha_input.clear()
         captcha_input.send_keys(text)
         time.sleep(2)
         
-        button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.ID, 'guestlogin')))
-        button.click()
+        try:
+            button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.ID, 'guestlogin')))
+            button.click()
+        except Exception as e:
+            print(f"Click issue:{e}")            
 
-        time.sleep(10)
+        time.sleep(12)
 
         try:
             element = driver.find_element(By.XPATH, '//span[@class="error"]')
+            print("Checking Error Element")
             if element:
                 continue
         except:
+            print("There is no Captcha Error")
             driver.switch_to.default_content()
             break
 
@@ -173,12 +192,12 @@ def click_back_button_in_csv_file():
         backButton = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, '//button[@id="iframe_back"]')))
         backButton.click()
     except Exception as e:
-        # Handle the exception
         print(f"An error occurred: {e}")
     
 def csv_file(data):
-    current_date = datetime.now().strftime("%Y-%m-%d") #Assign Current Dates
-    csv_file_path = f'Output/{current_date}.csv' #Assign CSV Paths
+    # CRNNumber_for_file_name = CRNNumber[0]
+    csv_file_path = f'Output/Audit_{current_date}.csv' #Assign CSV Paths
+    CRNNumber.clear()
     if not os.path.isfile(csv_file_path):         # Check if the CSV file existss
         with open(csv_file_path, 'w', newline='', encoding='utf-8') as csv_file: # If it doesn't exist, create the file and write header
             csv_writer = csv.writer(csv_file)
@@ -197,16 +216,48 @@ def csv_file(data):
                              'Petitioner and Advocate',
                              'Respondent and Advocate',
                              'Under Act(s)',
-                             'Under Section(s)'
+                             'Under Section(s)',
+                             'Date of data scraping'
                              ]) 
     with open(csv_file_path, 'a', newline='', encoding='utf-8') as csv_file:
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(data)
-        
+
+CRNNumber = []
+
+def error_log_file(error_log):
+    error_file_path = f'Output/Error_log_{current_date}.csv'
+    if not os.path.isfile(error_log_file):
+        with open(error_file_path, 'w', newline='', encoding= 'utf-8') as csv:
+            csv_writer = csv.writer(csv_file)
+            csv_writer.writerow([
+                            'Cases',
+                            'Error',
+                            'Date'
+                            ])
+    with open(error_file_path, 'a', newline='', encoding='utf-8') as csv_file:
+        csv_writer = csv.writer(csv_file)
+        csv_writer.writerow(error_log)
+
 def data_extract_from_csv_file():
     iframe = driver.find_element(By.ID, 'case_history')     # Find the iframe element
     driver.switch_to.frame(iframe)
     time.sleep(0.5)
+    try:
+        element = driver.find_element(By.XPATH,"//h1[@class='title-text' and text()='Secure Connection Failed']")
+        if element:
+            print("Secure Connection Failed. Exiting without processing further.")
+            error_log = [
+                case[0],
+                'Secure Connection Failed Error',
+                current_date    
+            ]
+            error_log_file(error_log)
+            case.clear()
+            driver.switch_to.default_content()
+            return
+    except Exception as e:
+        print(f'No Secure Connection Failed: {e}')
     
     def case_type(): # Extract the "Case Type" values
         try:
@@ -219,18 +270,49 @@ def data_extract_from_csv_file():
         
     def filing_number():  # Filling Number 
         try:
-            filling_number_element = driver.find_element(By.XPATH, "(//span[@class='case_details_table'])[2]")
-            filling_number = filling_number_element.text.split(':')[-1].strip()
-            return filling_number
+            # Locate the element containing filing information using XPath
+            filing_number_element = driver.find_element(By.XPATH, "(//span[@class='case_details_table'])[2]")
+            # Get the text content of the located element
+            filing_info_text = filing_number_element.text
+            # Print the original filing number information
+            # print("Original Filing Information:", filing_info_text)
+            # Use regular expression to extract the filing number
+            filing_number_match = re.search(r'Filing\s*Number\s*:\s*(\d+/\d+)', filing_info_text)
+            # Check if a match is found
+            if filing_number_match:
+                filing_number = filing_number_match.group(1).lstrip()
+                # print("Extracted Filing Number:", filing_number)
+                return filing_number
+            else:
+                print("Filing number not found.")
+
+            
         except Exception as e:
             print(f"An error occurred while fetching Filling Number: {str(e)}")
+            return None
+
+    def filing_date(): # Extract the filing date value
+        try:
+            filing_date_label = driver.find_element(By.XPATH, "(//span[@class='case_details_table'])[2]")
+            filing_date_value = filing_date_label.text.split(':')[-1].strip()
+            print("FILINGGGG DATE:",filing_date_value)
+            return filing_date_value
+        except Exception as e:
+            print(f"An error occurred while fetching Filling Date Value: {str(e)}")
             return None
 
     def registration_number(): # Registration Number
         try:
             registration_number_element = driver.find_element(By.XPATH, "(//span[@class='case_details_table'])[3]")
-            registration_number = registration_number_element.text.split(':')[-1].strip()
-            return registration_number
+            registration_number = registration_number_element.text
+            # Using regular expression to extract Registration Number
+            registration_number_match = re.search(r'Registration Number\s*:\s*(\d+/\d+)', registration_number)
+            if registration_number_match:
+                registration_number = registration_number_match.group(1).lstrip()
+                print("Registration Number:", registration_number)
+                return registration_number
+            else:
+                print("Registration number not found.")
         except Exception as e:
             print(f"An error occurred while fetching Registration Number: {str(e)}")
             return None
@@ -239,18 +321,10 @@ def data_extract_from_csv_file():
         try:
             CRN_Number_element = driver.find_element(By.XPATH, "(//span[@class='case_details_table'])[4]")
             CRN_Number = CRN_Number_element.text.split(':')[-1].strip()
+            CRNNumber.append(CRN_Number)
             return CRN_Number
         except Exception as e:
             print(f"An error occurred while fetching CRN Number: {str(e)}")
-            return None
-
-    def filing_date(): # Extract the filing date value
-        try:
-            filing_date_label = driver.find_element(By.XPATH, "//label[text()='Filing Date']")
-            filing_date_value = filing_date_label.find_element(By.XPATH, "//following-sibling::text()").text.strip()
-            return filing_date_value
-        except Exception as e:
-            print(f"An error occurred while fetching Filling Date Value: {str(e)}")
             return None
 
     def registration_date():  #Registration Date 
@@ -259,6 +333,7 @@ def data_extract_from_csv_file():
             registration_date = registration_date_element.get_attribute("textContent").strip()
             if ':' in registration_date:
                 registration_date = registration_date.replace(':', '')
+            registration_date = registration_date.lstrip()
             return registration_date
         except Exception as e:
             print(f"An error occurred while fetching Registration Date: {str(e)}")
@@ -270,6 +345,7 @@ def data_extract_from_csv_file():
             first_hearing_date = first_hearing_date_element.get_attribute("textContent").strip()
             if ':' in first_hearing_date:
                 first_hearing_date = first_hearing_date.replace(':', '')
+            first_hearing_date = first_hearing_date.lstrip()
             return first_hearing_date
         except Exception as e:
             print(f"An error occurred while fetching First Hearing Date: {str(e)}")
@@ -281,6 +357,7 @@ def data_extract_from_csv_file():
             next_hearing_date = next_hearing_date_element.get_attribute("textContent").strip()
             if ':' in next_hearing_date:
                 next_hearing_date = next_hearing_date.replace(':', '')
+            next_hearing_date = next_hearing_date.lstrip()
             return next_hearing_date
         except Exception as e:
             print(f"An error occurred while fetching Next Hearing Date: {str(e)}")
@@ -292,6 +369,7 @@ def data_extract_from_csv_file():
             Stage_of_Case = Stage_of_Case_element.get_attribute("textContent").strip()
             if ':' in Stage_of_Case:
                 Stage_of_Case = Stage_of_Case.replace(':', '')
+            Stage_of_Case = Stage_of_Case.lstrip()
             return Stage_of_Case
         except Exception as e:
                 print(f"An error occurred while fetching Stage of Case: {str(e)}")
@@ -302,7 +380,8 @@ def data_extract_from_csv_file():
             Court_Number_and_Judge_element = driver.find_element(By.XPATH,'(//div//span//label//strong)[8]')
             Court_Number_and_Judge = Court_Number_and_Judge_element.get_attribute("textContent").strip()
             if ':' in Court_Number_and_Judge:
-                Court_Number_and_Judge = Court_Number_and_Judge.replace(':', '')    
+                Court_Number_and_Judge = Court_Number_and_Judge.replace(':', '')  
+            Court_Number_and_Judge = Court_Number_and_Judge.lstrip()  
             return Court_Number_and_Judge
         except Exception as e:
             print(f"An error occurred while fetching Court Number and Judge: {str(e)}")
@@ -320,7 +399,7 @@ def data_extract_from_csv_file():
     def respondent_and_advocate(): #Respondent and Advocate
         try:
             respondent_advocate_table_element = driver.find_element(By.CLASS_NAME, 'Respondent_Advocate_table')
-            respondent_advocate_text = respondent_advocate_table_element.text
+            respondent_advocate_text = respondent_advocate_table_element.text.replace('\n', '')
             return respondent_advocate_text
         except Exception as e:
             print(f"An error occurred while fetching Respondent and Advocate: {str(e)}")
@@ -360,10 +439,10 @@ def data_extract_from_csv_file():
 
     print("CASE TYPE ",case_type_data)
     print("FILING NUMBER ",filing_number_data)
-    print("REGISTRATION NUMBER ",registration_number_data)
-    print("CRN NUMBER ", crn_number_data)
     print("FILING DATE ", filing_date_data)
+    print("REGISTRATION NUMBER ",registration_number_data)
     print("REGISTRATION DATE ", registration_date_data)
+    print("CRN NUMBER ", crn_number_data)
     print("FIRST HEARING DATE ", first_hearing_date_data)
     print("NEXT HEARING DATE ", next_hearing_date_data)
     print("STAGE OF CASTE DATA ", stage_of_case_data)
@@ -372,16 +451,17 @@ def data_extract_from_csv_file():
     print("RESPONDENT AND ADVOCATE DATA ", respondent_and_advocate_data)
     print("UNDER ACT ", under_act_data)
     print("UNDER SECTION ", under_section_data)
+    print("CURRENT DATE ", current_date)
 
     # Example usage:
     data_to_save = [
                     case[0],
                     case_type_data,
                     filing_number_data,
-                    registration_number_data,
-                    crn_number_data,
                     filing_date_data,
+                    registration_number_data,
                     registration_date_data,
+                    crn_number_data,
                     first_hearing_date_data,
                     next_hearing_date_data,
                     stage_of_case_data,
@@ -389,7 +469,8 @@ def data_extract_from_csv_file():
                     petitioner_and_Advocate_data,
                     respondent_and_advocate_data,
                     under_act_data,
-                    under_section_data
+                    under_section_data,
+                    current_date
                     ]
     csv_file(data_to_save)
     case.clear()
@@ -405,6 +486,7 @@ def extract_text_loop():
         time.sleep(1)
         second_captcha_solver()
         time.sleep(1)
+        print("After Second Captcha")
         data_extract_from_csv_file()
         time.sleep(1)
         click_back_button_in_csv_file()
@@ -443,21 +525,38 @@ def last_fourth_back():
 
 Cases = []
 
-''' STEP 5 == Clicking on 20-30 year Total link'''
+''' STEP 5 == Fourth Loop'''
 def fourth_loop():
-    xpath = "(//tbody[@id='est_report_body']/tr/td[4]/a)"
-    wait = WebDriverWait(driver, 20)
-    elements = wait.until(EC.presence_of_all_elements_located((By.XPATH, xpath)))
-    for element in elements:
-        time.sleep(0.5)
-        element.click()
-        time.sleep(1)
-        captcha_solve_loop() 
-        extract_text_loop()
-        time.sleep(0.5)
-        back()
-        time.sleep(2)
-    last_second_back()
+    try:
+        xpath = "(//tbody[@id='est_report_body']/tr/td[4]/a)"
+        wait = WebDriverWait(driver, 20)
+        elements = wait.until(EC.presence_of_all_elements_located((By.XPATH, xpath)))
+        count = 1
+        for element in elements:
+            if count == 1:
+                count += 1
+                continue
+            try:
+                time.sleep(0.5)
+                element.click()
+                time.sleep(1)
+                captcha_solve_loop()
+                extract_text_loop()
+                time.sleep(0.5)
+                back()
+                time.sleep(2)
+            except NoSuchElementException as e:
+                print(f"Element not found: {e}")
+            except Exception as e:
+                print(f"An unexpected error occurred: {e}")
+            finally:
+                time.sleep(2)
+        last_second_back()
+
+    except TimeoutException as te:
+        print(f"Timeout waiting for elements to be present: {te}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
 
 ''' STEP 4 == Clicking on 20-30 year Total link'''
 def third_loop():
@@ -480,7 +579,6 @@ def second_loop_both_button_clicked_single_row_column():
     element = driver.find_element(By.XPATH, xpath)
     element.click()
 
-
 ''' STEP 2 == Clicking on 20-30 year Total link'''
 def first_loop():
     button_xpath = "(//tbody[@id='state_report_body']/tr/td[4]/a)"
@@ -494,13 +592,13 @@ def first_loop():
             #     skip+=1
             #     continue
             element.click()
-            time.sleep(0.5)
+            time.sleep(1)
             second_loop_both_button_clicked_single_row_column()
-            time.sleep(0.5)
+            time.sleep(1)
             third_loop()
-            time.sleep(0.5)
+            time.sleep(1)
             last_third_back()
-            time.sleep(0.5)
+            time.sleep(1)
             last_fourth_back()
             time.sleep(0.5)
     except Exception as e:
